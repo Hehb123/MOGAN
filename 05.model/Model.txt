@@ -1,0 +1,64 @@
+library(tibble)
+library(data.table)
+library(caret)
+fivegene = read.delim('../07.DEGs/fivegene.txt')
+fivegene = fivegene$x
+exp = fread('../07.DEGs/exp.csv')
+exp = column_to_rownames(exp,'V1')
+
+exp = exp[fivegene,]
+exp = as.data.frame(t(exp))
+subtype = read.csv('../01.subtype/subtype.csv')
+exp = exp[subtype$X,]
+identical(rownames(exp),subtype$X)
+exp$subtype = subtype$group
+exp$subtype = ifelse(exp$subtype==1,'subtype1','subtype2')
+exp$subtype = as.factor(exp$subtype)
+
+set.seed(123)
+trainIndex = createDataPartition(exp$subtype, p = 0.6, list = FALSE)
+trainData = exp[trainIndex, ]
+testData = exp[-trainIndex, ]
+
+ctrl = trainControl(method="repeatedcv", number=5, repeats=10, search="random")
+tuneGrid <- expand.grid(mtry=c(3,10,20,50,100,300,700,1000,2000))
+rf_grid <- train(subtype~., data = trainData, method="rf", 
+                 tuneGrid = tuneGrid, # 随机15个参数值或参数值组合
+                 metric="Accuracy", #metric='Kappa'
+                 trControl=ctrl)
+predictions = predict(rf_grid, newdata = testData)
+
+# 计算预测准确率
+accuracy = sum(predictions == testData$subtype) / nrow(testData)
+
+
+tp = sum(predictions == 'subtype1' &testData$subtype == 'subtype1')
+fp = sum(predictions == 'subtype1' &testData$subtype == 'subtype2')
+fn = sum(predictions == 'subtype2' &testData$subtype == 'subtype1')
+
+precision = tp / (tp + fp)
+recall = tp / (tp + fn)
+f1_score = 2 * precision * recall / (precision + recall)
+
+
+
+library(caret)
+library(ROCR)
+
+# 预测概率
+prob <- predict(fit, testData, type = "prob")[,'subtype1']
+
+# 真实类别标签
+actual <- testData$subtype
+actual = as.character(actual)
+# 创建预测对象
+predictions <- prediction(prob, actual)
+
+# 设置新的分类阈值
+new_threshold <- 0.4
+
+# 根据新的分类阈值生成预测结果
+new_pred <- ifelse(prob > new_threshold, "subtype1", "subtype2")
+table(actual,new_pred)
+
+
